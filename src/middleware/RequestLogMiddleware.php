@@ -2,21 +2,21 @@
 
 use Closure;
 use Elasticsearch\ClientBuilder;
+use Finalizer;
 use Uuid;
 
-
-class RequestLogMiddleware
-{
+class RequestLogMiddleware {
 
     private $hosts;
     private $start;
     private $requestUuid;
     private $extra = [];
+    private $finalizer;
 
-    public function __construct($hosts)
-    {
+    public function __construct($hosts) {
         $this->hosts = [$hosts];
         $this->start = microtime(true);
+        $this->finalizer = new \Tuupke\Finalizer\Finalizer();
         $this->requestUuid = (string)Uuid::generate();
     }
 
@@ -27,8 +27,7 @@ class RequestLogMiddleware
      * @param  \Closure $next
      * @return mixed
      */
-    public function handle($request, Closure $next)
-    {
+    public function handle($request, Closure $next) {
         return $next($request);
     }
 
@@ -39,32 +38,32 @@ class RequestLogMiddleware
      * @param $request
      * @param $response
      */
-    public function terminate($request, $response)
-    {
-//        $this->deleteIndex('requests');$this->createIndex('requests');
-        $client = $this->getClient();
+    public function terminate($request, $response) {
+        $this->finalizer->register(function () use ($request, $response) {
+            $client = $this->getClient();
 
-        $data = [
-            "time"     => date('Y-m-d\TH:i:sP'),
-            "timestamp"=> time(),
-            "duration" => (microtime(true) - $this->start) * 1000,
-            "durationUnit" => 'ms',
-            "request"  => $this->getGet($request),
-            "response"  => $response->getContent(),
-        ];
+            $data = [
+                "time"         => date('Y-m-d\TH:i:sP'),
+                "timestamp"    => time(),
+                "duration"     => (microtime(true) - $this->start) * 1000,
+                "durationUnit" => 'ms',
+                "request"      => $this->getGet($request),
+                "response"     => $response->getContent(),
+            ];
 
-        $data = array_merge($data, $this->extra);
+            $data = array_merge($data, $this->extra);
 
-        $params = [
-            'index' => 'requests',
-            'type' => 'request',
-            'id' => $this->requestUuid,
-            'body' => $data,
-        ];
+            $params = [
+                'index' => 'requests',
+                'type'  => 'request',
+                'id'    => $this->requestUuid,
+                'body'  => $data,
+            ];
 
-        if(env('REQUEST_LOG', false)){
-            $r = $client->index($params); // TODO: log fails
-        }
+            if (env('REQUEST_LOG', false)) {
+                $r = $client->index($params); // TODO: log fails
+            }
+        });
     }
 
     /**
@@ -72,17 +71,17 @@ class RequestLogMiddleware
      *
      * @param $name
      */
-    public function createIndex($name){
+    public function createIndex($name) {
         $client = $this->getClient();
 
         $params = [
             'index' => $name,
-            'body' => [
+            'body'  => [
                 'settings' => [
-                    'number_of_shards' => 2,
-                    'number_of_replicas' => 0
-                ]
-            ]
+                    'number_of_shards'   => 2,
+                    'number_of_replicas' => 0,
+                ],
+            ],
         ];
 
         $client->indices()->create($params);
@@ -93,11 +92,11 @@ class RequestLogMiddleware
      *
      * @param $name
      */
-    public function deleteIndex($name){
+    public function deleteIndex($name) {
         $client = $this->getClient();
 
         $params = [
-            'index' => $name
+            'index' => $name,
         ];
 
         $client->indices()->delete($params);
@@ -108,7 +107,7 @@ class RequestLogMiddleware
      *
      * @return \Elasticsearch\Client
      */
-    public function getClient(){
+    public function getClient() {
         return ClientBuilder::create()->setHosts($this->hosts)->build();
     }
 
@@ -117,7 +116,7 @@ class RequestLogMiddleware
      *
      * @return array
      */
-    public function getExtra(){
+    public function getExtra() {
         return $this->extra;
     }
 
@@ -128,8 +127,7 @@ class RequestLogMiddleware
      * @param $object
      * @return array
      */
-    private function getGet($object)
-    {
+    private function getGet($object) {
         // Get all methods of the object.
         $all = get_class_methods($object);
 
@@ -168,7 +166,7 @@ class RequestLogMiddleware
      *
      * @return string
      */
-    public function getRequestLogUuid(){
+    public function getRequestLogUuid() {
         return $this->requestUuid;
     }
 
@@ -177,10 +175,8 @@ class RequestLogMiddleware
      *
      * @return array
      */
-    public function setExtra($array = []){
+    public function setExtra($array = []) {
         return $this->extra = array_merge($this->extra, $array);
     }
-
-
 
 }
